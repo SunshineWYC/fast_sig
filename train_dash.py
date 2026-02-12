@@ -80,7 +80,7 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
-    use_sparse_adam = opt.optimizer_type == "sparse_adam" and SPARSE_ADAM_AVAILABLE 
+    use_sparse_adam = opt.optimizer_type == "sparse_adam" and SPARSE_ADAM_AVAILABLE
     depth_l1_weight = get_expon_lr_func(opt.depth_l1_weight_init, opt.depth_l1_weight_final, max_steps=opt.iterations)
 
     viewpoint_stack = scene.getTrainCameras().copy()
@@ -256,9 +256,26 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                 cam_rot_delta.data.fill_(0)
                 cam_trans_delta.data.fill_(0)
     
+    point_cloud_path = os.path.join(scene.model_path, "point_cloud/iteration_{}/point_cloud.ply".format(iteration))
+    scene.gaussians.save_ply(f"{point_cloud_path}")
+
+    # Export refined camera poses in COLMAP format (train/test views) to model_path/pose_refine
+    try:
+        from utils.pose_refine_utils import export_refined_colmap_model
+
+        source_sparse_dir = os.path.join(dataset.source_path, "sparse", "0")
+        out_dir = os.path.join(scene.model_path, "pose_refine")
+        export_refined_colmap_model(
+            source_sparse_dir=source_sparse_dir,
+            out_dir=out_dir,
+            global_transform=global_transform,
+        )
+        print(f"[OK] Exported refined COLMAP model to: {out_dir}")
+    except Exception as exc:
+        print(f"[WARN] Failed to export refined COLMAP poses: {exc}")
+
     with open(os.path.join(scene.model_path, "TRAIN_INFO"), "w+") as f:
         f.write("GS Number: {}\n".format(gaussians._scaling.shape[0]))
-
 
 
 def eval(dataset, pipe, case_name, scene : Scene, renderFunc, renderArgs, iteration: int, time: int, log_file=None, global_transform=None):
