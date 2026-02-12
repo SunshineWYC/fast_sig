@@ -1,0 +1,135 @@
+#
+# Copyright (C) 2023, Inria
+# GRAPHDECO research group, https://team.inria.fr/graphdeco
+# All rights reserved.
+#
+# This software is free for non-commercial, research and evaluation use 
+# under the terms of the LICENSE.md file.
+#
+# For inquiries contact  george.drettakis@inria.fr
+#
+
+import torch
+from torch import nn
+import numpy as np
+from utils.graphics_utils import getWorld2View2, getProjectionMatrix
+from utils.general_utils import PILtoTorch
+import cv2
+
+class Camera(nn.Module):
+    def __init__(self, resolution, colmap_id, R, T, FoVx, FoVy, depth_params, image, invdepthmap,
+                 image_name, uid,
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda",
+                 train_test_exp = False, is_test_dataset = False, is_test_view = False
+                 ):
+        super(Camera, self).__init__()
+
+        self.uid = uid
+        self.colmap_id = colmap_id
+        self.FoVx = FoVx
+        self.FoVy = FoVy
+        self.image_name = image_name
+        self.update_W2C = False
+        self.update_W2I = False
+        self.update_center = False
+        self.W2C = None
+        self.W2I = None
+        self.center = None
+        self.is_test_view = is_test_view
+        
+        
+        try:
+            self.data_device = torch.device(data_device)
+        except Exception as e:
+            print(e)
+            print(f"[Warning] Custom device {data_device} failed, fallback to default cuda device" )
+            self.data_device = torch.device("cuda")
+        
+        self.R = torch.tensor(R, device=self.data_device).float()
+        self.T = torch.tensor(T, device=self.data_device).float()
+        
+        
+        
+        resized_image_rgb = PILtoTorch(image, resolution)
+        gt_image = resized_image_rgb[:3, ...]
+        
+        # we don't need mask, so that it can be removed to save memory
+        # self.alpha_mask = None
+        # if resized_image_rgb.shape[0] == 4:
+        #     self.alpha_mask = resized_image_rgb[3:4, ...].to(self.data_device)
+        # else: 
+        #     self.alpha_mask = torch.ones_like(resized_image_rgb[0:1, ...].to(self.data_device))
+
+        # if train_test_exp and is_test_view:
+        #     if is_test_dataset:
+        #         self.alpha_mask[..., :self.alpha_mask.shape[-1] // 2] = 0
+        #     else:
+        #         self.alpha_mask[..., self.alpha_mask.shape[-1] // 2:] = 0
+
+        self.original_image = gt_image.clamp(0.0, 1.0).to(self.data_device)
+        self.image_width = self.original_image.shape[2]
+        self.image_height = self.original_image.shape[1]
+
+        self.depth_reliable = False
+        if invdepthmap is not None:
+            self.invdepthmap = cv2.resize(invdepthmap, resolution)
+            self.invdepthmap[self.invdepthmap < 0] = 0
+            self.depth_reliable = True
+
+            if self.invdepthmap.ndim != 2:
+                self.invdepthmap = self.invdepthmap[..., 0]
+            self.invdepthmap = torch.from_numpy(self.invdepthmap[None]).to(self.data_device)
+
+        self.zfar = 100.0
+        self.znear = 0.01
+
+        self.trans = trans
+        self.scale = scale
+
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+        
+    def update_RT(self, R, t):
+        self.R = R.to(device=self.data_device)
+        self.T = t.to(device=self.data_device)
+        
+    @property
+    def world_view_transform(self):
+        if self.update_W2C:
+            return self.W2C
+        else:
+            self.W2C = getWorld2View2(self.R, self.T).transpose(0, 1)
+            self.update_W2C = True
+            return self.W2C
+    
+    @property
+    def full_proj_transform(self):
+        if self.update_W2I:
+            return self.W2I
+        else:
+            self.W2I = (self.world_view_transform.unsqueeze(0).bmm(
+                self.projection_matrix.unsqueeze(0))).squeeze(0)
+            self.update_W2I = True
+            return self.W2I
+        
+    @property
+    def camera_center(self):
+        if self.update_center:
+            return self.center
+        else:
+            self.center = self.world_view_transform.inverse()[3, :3]
+            self.update_center = True
+            return self.center
+        
+class MiniCam:
+    def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
+        self.image_width = width
+        self.image_height = height    
+        self.FoVy = fovy
+        self.FoVx = fovx
+        self.znear = znear
+        self.zfar = zfar
+        self.world_view_transform = world_view_transform
+        self.full_proj_transform = full_proj_transform
+        view_inv = torch.inverse(self.world_view_transform)
+        self.camera_center = view_inv[3][:3]
+

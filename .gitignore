@@ -1,0 +1,23 @@
+*.pyc
+# .vscode
+output
+build
+diff_rasterization/diff_rast.egg-info
+diff_rasterization/dist
+tensorboard_3d
+screenshots
+__pycache__
+data
+tiny-cuda-nn
+# weight
+metric_depth_vit_giant2_800k.pth
+model.safetensors
+model.safetensors*
+*.ply
+*.pt
+eval_logs
+*.run
+.vscode/launch.json
+.vscode/settings.json
+.vscode/c_cpp_properties.json
+align_outputs
