@@ -21,7 +21,7 @@ def loadCam(args, id, cam_info, resolution_scale, is_nerf_synthetic, is_test_dat
     from scene.cameras import Camera
     image = Image.open(cam_info.image_path)
     invdepthmap = None
-    if not cam_info.is_test:
+    if args.use_depth_supervision and (not cam_info.is_test):
         invdepth_path = os.path.join(args.model_path, "mono_depths",os.path.basename(cam_info.image_path).replace(".png", "_depth.npy").replace(".jpg", "_depth.npy"))
         # invdepth_path = os.path.dirname(os.path.dirname(cam_info.image_path)) + "/mono_depths/" + os.path.basename(cam_info.image_path).replace(".png", "_depth.npy").replace(".jpg", "_depth.npy")
         # invdepth_path = cam_info.image_path.replace("images*", "inv_depths").replace(".png", ".npy").replace(".jpg", ".npy")
@@ -86,7 +86,7 @@ def loadCam(args, id, cam_info, resolution_scale, is_nerf_synthetic, is_test_dat
 def cameraList_from_camInfos(cam_infos, resolution_scale, args, is_nerf_synthetic, is_test_dataset):
     camera_list = []
 
-    for id, c in tqdm(enumerate(cam_infos)):
+    for id, c in tqdm(enumerate(cam_infos), desc="Loading cameras at resolution scale " + str(resolution_scale)):
         camera_list.append(loadCam(args, id, c, resolution_scale, is_nerf_synthetic, is_test_dataset))
 
     return camera_list
