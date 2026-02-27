@@ -69,13 +69,13 @@ class PipelineParams(ParamGroup):
         self.convert_SHs_python = False
         self.compute_cov3D_python = False
         self.debug = False
-        self.antialiasing = False
+        self.antialiasing = True
         # Optional initialization
         self.use_anysplat_init = False
         # DashGaussian parameters
-        self.resolution_mode = "const"
-        self.densify_mode = "free"
-        self.max_n_gaussian = -1
+        self.resolution_mode = "freq"
+        self.densify_mode = "freq"
+        self.max_n_gaussian = 1000000
         self.FF_downsample=8
         super().__init__(parser, "Pipeline Parameters")
 
@@ -88,8 +88,8 @@ class OptimizationParams(ParamGroup):
         self.offset_lr_delay_mult = 0.01
         self.offset_lr_max_steps = 30_000
         
-        self.xyz_lr_init = 0.0
-        self.xyz_lr_final = 0.0
+        self.xyz_lr_init = 0.00016
+        self.xyz_lr_final = 0.000016
         self.xyz_lr_delay_mult = 0.01
         self.xyz_lr_max_steps = self.iterations
 
@@ -99,26 +99,6 @@ class OptimizationParams(ParamGroup):
         self.opacity_lr = 0.02
         self.scaling_lr = 0.007
         self.rotation_lr = 0.002
-        
-        self.mlp_opacity_lr_init = 0.002
-        self.mlp_opacity_lr_final = 0.00002  
-        self.mlp_opacity_lr_delay_mult = 0.01
-        self.mlp_opacity_lr_max_steps = 30_000
-
-        self.mlp_cov_lr_init = 0.004
-        self.mlp_cov_lr_final = 0.004
-        self.mlp_cov_lr_delay_mult = 0.01
-        self.mlp_cov_lr_max_steps = 30_000
-        
-        self.mlp_color_lr_init = 0.008
-        self.mlp_color_lr_final = 0.00005
-        self.mlp_color_lr_delay_mult = 0.01
-        self.mlp_color_lr_max_steps = 30_000
-        
-        self.mlp_featurebank_lr_init = 0.01
-        self.mlp_featurebank_lr_final = 0.00001
-        self.mlp_featurebank_lr_delay_mult = 0.01
-        self.mlp_featurebank_lr_max_steps = 30_000
 
         self.appearance_lr_init = 0.05
         self.appearance_lr_final = 0.0005
@@ -129,23 +109,23 @@ class OptimizationParams(ParamGroup):
         self.lambda_dssim = 0.2
         self.densification_interval = 100
         
-        # for anchor densification
-        self.start_stat = 500
-        self.update_from = 1500
-        self.update_interval = 100
-        self.update_until = 15_000
-        
         self.min_opacity = 0.005
         self.success_threshold = 0.8
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
-        self.use_pose_optimization = True
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
         self.depth_l1_weight_init = 1.0
         self.depth_l1_weight_final = 0.01
         self.random_background = False
         self.optimizer_type = "default"
+
+        self.use_pose_optimization = True
+        self.pose_rot_lr = 0.00008
+        self.pose_trans_lr = 0.00005
+        self.pose_update_from = 1000
+        self.pose_update_interval = 400
+        self.pose_update_until = 15_000
         
         # faster parameters
         self.loss_thresh = 0.1

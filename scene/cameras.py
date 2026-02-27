@@ -47,7 +47,13 @@ class Camera(nn.Module):
         
         self.R = torch.tensor(R, device=self.data_device).float()
         self.T = torch.tensor(T, device=self.data_device).float()
-        
+        # Per-camera pose deltas (SE3 tangent vector split into rot/trans).
+        self.cam_rot_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device=self.data_device)
+        )
+        self.cam_trans_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device=self.data_device)
+        )
         
         
         resized_image_rgb = PILtoTorch(image, resolution)
@@ -71,6 +77,7 @@ class Camera(nn.Module):
         self.image_height = self.original_image.shape[1]
 
         self.depth_reliable = False
+        self.invdepthmap = None
         if invdepthmap is not None:
             self.invdepthmap = cv2.resize(invdepthmap, resolution)
             self.invdepthmap[self.invdepthmap < 0] = 0
@@ -132,4 +139,3 @@ class MiniCam:
         self.full_proj_transform = full_proj_transform
         view_inv = torch.inverse(self.world_view_transform)
         self.camera_center = view_inv[3][:3]
-

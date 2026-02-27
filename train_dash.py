@@ -3,12 +3,10 @@ import sys
 import numpy as np
 import torch
 import time
-import json
-from torch import nn
 import lpips
 from random import randint
 from utils.loss_utils import l1_loss, ssim
-from utils.camera_utils import update_pose, update_pose_by_global
+from utils.camera_utils import update_pose
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state, get_expon_lr_func
@@ -18,7 +16,9 @@ from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.schedule_utils import TrainingScheduler
 from utils.fast_utils import sampling_cameras, compute_gaussian_score_fastgs
+from utils.pose_refine_utils import export_refined_colmap_model
 import cv2
+import json
 
 lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
 
@@ -95,29 +95,15 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
 
-    data_device = torch.device("cuda")
-
-    # Global pose delta
-    cam_rot_delta = nn.Parameter(
-        torch.zeros(3, requires_grad=True, device=data_device)
-    )
-    cam_trans_delta = nn.Parameter(
-        torch.zeros(3, requires_grad=True, device=data_device)
-    )
-    global_transform = torch.eye(4, device=data_device)
-    with open(os.path.join(scene.model_path, "global_transform.txt"), "w+") as f:
-        for row in global_transform.cpu().numpy():
-            f.write(" ".join([f"{x:.8f}" for x in row]) + "\n")
-    l = [ 
-        {'params': [cam_rot_delta], 'lr': 0.00002, "name": "pose_rot_delta"}, # 0.00008
-        {'params': [cam_trans_delta], 'lr': 0.00001, "name": "pose_trans_delta"}, # 0.00005
-    ]
-    
-    pose_optimizer = torch.optim.Adam(l)
+    pose_optimizer = None
+    if opt.use_pose_optimization:
+        pose_l = []
+        for cam in scene.getTrainCameras():
+            pose_l.append({'params': [cam.cam_rot_delta], 'lr': opt.pose_rot_lr, "name": f"pose_rot_delta_{cam.uid}"})
+            pose_l.append({'params': [cam.cam_trans_delta], 'lr': opt.pose_trans_lr, "name": f"pose_trans_delta_{cam.uid}"})
+        pose_optimizer = torch.optim.Adam(pose_l)
     
     render_scale = scheduler.get_res_scale(1)
-    start_time = time.time()
-    
     for iteration in range(first_iter, opt.iterations + 1):
 
         iter_start.record()
@@ -142,7 +128,17 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
         if render_scale > 1:
             gt_image = torch.nn.functional.interpolate(gt_image[None], scale_factor=1/render_scale, mode="bilinear", recompute_scale_factor=True, antialias=True)[0]
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE, render_size=gt_image.shape[-2:], cam_rot_delta=cam_rot_delta, cam_trans_delta=cam_trans_delta)
+        render_pkg = render(
+            viewpoint_cam,
+            gaussians,
+            pipe,
+            bg,
+            use_trained_exp=dataset.train_test_exp,
+            separate_sh=SPARSE_ADAM_AVAILABLE,
+            render_size=gt_image.shape[-2:],
+            cam_rot_delta=viewpoint_cam.cam_rot_delta,
+            cam_trans_delta=viewpoint_cam.cam_trans_delta,
+        )
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         # Loss
@@ -185,17 +181,6 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
             if iteration == opt.iterations:
                 progress_bar.close()
                 
-            # Check elapsed time
-            # elapsed_time = time.time() - start_time
-            # case_name = dataset.source_path.split('/')[-1]
-            # if elapsed_time >= 60 or iteration==opt.iterations:
-            #     print(f"\n[ITER {iteration}] Saving Gaussians at 60 seconds")
-            #     all_time = elapsed_time
-            #     eval(dataset, pipe, case_name, scene, render, (pipe, background, 1., SPARSE_ADAM_AVAILABLE, None, dataset.train_test_exp), iteration, 60, log_file, global_transform)
-            #     point_cloud_path = os.path.join(scene.model_path, "point_cloud/iteration_{}/point_cloud.ply".format(iteration))
-            #     scene.gaussians.save_ply(f"{point_cloud_path}")                
-            #     sys.exit(0)
-            
             # Densification and pruning
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
@@ -211,7 +196,9 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                     sample_view_stack = scene.getTrainCameras().copy()
                     camlist = sampling_cameras(sample_view_stack)
                     
-                    importance_score, pruning_score = compute_gaussian_score_fastgs(camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=True, cam_rot_delta=cam_rot_delta, cam_trans_delta=cam_trans_delta)                    
+                    importance_score, pruning_score = compute_gaussian_score_fastgs(
+                        camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=True
+                    )
                     momentum_add = gaussians.densify_and_prune_fastgs(max_screen_size = size_threshold, 
                                             max_grad=0.005,
                                             min_opacity = 0.005, 
@@ -241,46 +228,42 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none = True)
 
-                pose_optimizer.step()
-                pose_optimizer.zero_grad(set_to_none=True)
+                if pose_optimizer is not None:
+                    pose_optimizer.step()
+                    pose_optimizer.zero_grad(set_to_none=True)
             
             # Update camera poses
-            if iteration > opt.densify_from_iter and iteration % 300 == 0 and iteration < opt.densify_until_iter and opt.use_pose_optimization:
-                update_global=True
+            if (
+                opt.use_pose_optimization
+                and iteration > opt.pose_update_from
+                and iteration % opt.pose_update_interval == 0
+                and iteration < opt.pose_update_until
+            ):
                 for view in scene.getTrainCameras():
-                    _, global_transform = update_pose(view, cam_trans_delta, cam_rot_delta, global_transform, update_global)
-                    update_global=False
-                with open(os.path.join(scene.model_path, "global_transform.txt"), "w+") as f:
-                    for row in global_transform.cpu().numpy():
-                        f.write(" ".join([f"{x:.8f}" for x in row]) + "\n")
-                cam_rot_delta.data.fill_(0)
-                cam_trans_delta.data.fill_(0)
+                    update_pose(view)
     
+    if opt.use_pose_optimization:
+        for view in scene.getTrainCameras():
+            update_pose(view)
+
     point_cloud_path = os.path.join(scene.model_path, "point_cloud/iteration_{}/point_cloud.ply".format(iteration))
-    scene.gaussians.save_ply(f"{point_cloud_path}")
-
-    # Export refined camera poses in COLMAP format (train/test views) to model_path/pose_refine
-    try:
-        from utils.pose_refine_utils import export_refined_colmap_model
-
-        source_sparse_dir = os.path.join(dataset.source_path, "sparse", "0")
-        out_dir = os.path.join(scene.model_path, "pose_refine")
-        export_refined_colmap_model(
-            source_sparse_dir=source_sparse_dir,
-            out_dir=out_dir,
-            global_transform=global_transform,
-        )
-        print(f"[OK] Exported refined COLMAP model to: {out_dir}")
-    except Exception as exc:
-        print(f"[WARN] Failed to export refined COLMAP poses: {exc}")
+    scene.gaussians.save_ply(point_cloud_path)
 
     with open(os.path.join(scene.model_path, "TRAIN_INFO"), "w+") as f:
         f.write("GS Number: {}\n".format(gaussians._scaling.shape[0]))
 
+    pose_refined_dir = os.path.join(scene.model_path, "pose_refined")
+    source_sparse_dir = os.path.join(dataset.source_path, "sparse", "0")
+    export_refined_colmap_model(
+        source_sparse_dir=source_sparse_dir,
+        out_dir=pose_refined_dir,
+        refined_train_cameras=scene.getTrainCameras(),
+    )
+    scene.gaussians.save_ply(os.path.join(pose_refined_dir, "gs_points.ply"))
 
-def eval(dataset, pipe, case_name, scene : Scene, renderFunc, renderArgs, iteration: int, time: int, log_file=None, global_transform=None):
+def eval(dataset, pipe, case_name, scene : Scene, renderFunc, renderArgs, iteration: int, time: int, log_file=None):
     torch.cuda.empty_cache()
-    config = {'name': 'test', 'cameras' : scene.getTestCameras()}
+    config = {'name': 'train', 'cameras' : scene.getTrainCameras()}
     (pipe, background, scale_factor, SPARSE_ADAM_AVAILABLE, overide_color, train_test_exp) = renderArgs
     if config['cameras'] and len(config['cameras']) > 0:
         l1_test = 0.0
@@ -288,11 +271,18 @@ def eval(dataset, pipe, case_name, scene : Scene, renderFunc, renderArgs, iterat
         lpips_test = 0.0
         ssim_test = 0.0
         for idx, viewpoint in enumerate(config['cameras']):
-            
-            transform_viewpoint = update_pose_by_global(viewpoint, global_transform)
-            image = torch.clamp(renderFunc(transform_viewpoint, scene.gaussians, *renderArgs, train_cameras = scene.getTrainCameras() if train_test_exp else None)["render"], 0.0, 1.0) 
-            
-            gt_image = torch.clamp(transform_viewpoint.original_image.to("cuda"), 0.0, 1.0)
+            image = torch.clamp(
+                renderFunc(
+                    viewpoint,
+                    scene.gaussians,
+                    *renderArgs,
+                    train_cameras=scene.getTrainCameras() if train_test_exp else None,
+                )["render"],
+                0.0,
+                1.0,
+            )
+
+            gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
             l1_test += l1_loss(image, gt_image).mean().double()
             psnr_test += psnr(image, gt_image).mean().double()
             lpips_test += lpips_fn(image, gt_image).mean().double()
@@ -300,7 +290,13 @@ def eval(dataset, pipe, case_name, scene : Scene, renderFunc, renderArgs, iterat
             image_write = image.permute(1,2,0).detach().cpu().numpy()
             image_write = (image_write * 255).astype("uint8")
             os.makedirs(f"{scene.model_path}/test/", exist_ok = True)
-            cv2.imwrite(os.path.join(f"{scene.model_path}/test/", "{}_{}_iter{:06d}.png".format(config['name'], transform_viewpoint.image_name, iteration)), cv2.cvtColor(image_write, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(
+                os.path.join(
+                    f"{scene.model_path}/test/",
+                    "{}_{}_iter{:06d}.png".format(config['name'], viewpoint.image_name, iteration),
+                ),
+                cv2.cvtColor(image_write, cv2.COLOR_RGB2BGR),
+            )
         
         psnr_test /= len(config['cameras'])
         l1_test /= len(config['cameras'])
@@ -346,9 +342,9 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
     # Start GUI server, configure and run training
-    if not args.disable_viewer:
-        network_gui.init(args.ip, args.port)
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
+    # if not args.disable_viewer:
+    #     network_gui.init(args.ip, args.port)
+    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
     
     training(lp.extract(args), op.extract(args), pp.extract(args), args.debug_from, args.log_file)
 

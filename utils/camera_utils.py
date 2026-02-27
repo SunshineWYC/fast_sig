@@ -10,7 +10,6 @@
 #
 
 import numpy as np
-from utils.graphics_utils import fov2focal
 from PIL import Image
 import cv2
 from tqdm import tqdm
@@ -92,28 +91,6 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, is_nerf_syntheti
 
     return camera_list
 
-def camera_to_JSON(id, camera):
-    Rt = np.zeros((4, 4))
-    Rt[:3, :3] = camera.R.transpose()
-    Rt[:3, 3] = camera.T
-    Rt[3, 3] = 1.0
-
-    W2C = np.linalg.inv(Rt)
-    pos = W2C[:3, 3]
-    rot = W2C[:3, :3]
-    serializable_array_2d = [x.tolist() for x in rot]
-    camera_entry = {
-        'id' : id,
-        'img_name' : camera.image_name,
-        'width' : camera.width,
-        'height' : camera.height,
-        'position': pos.tolist(),
-        'rotation': serializable_array_2d,
-        'fy' : fov2focal(camera.FovY, camera.height),
-        'fx' : fov2focal(camera.FovX, camera.width)
-    }
-    return camera_entry
-
 
 def SO3_exp(theta):
     device = theta.device
@@ -174,29 +151,8 @@ def SE3_exp(tau):
     T[:3, :3] = R
     T[:3, 3] = t
     return T
-# def update_pose(camera, , , converged_threshold=1e-4):
-#     tau = torch.cat([camera.cam_trans_delta, camera.cam_rot_delta], axis=0)
-
-#     T_w2c = torch.eye(4, device=tau.device)
-#     R_pose = camera.R # 注意camera里的R是W2C.R的转置
-#     T_w2c[0:3, 0:3] = R_pose.T
-#     T_w2c[0:3, 3] = camera.T
-
-#     new_w2c = SE3_exp(tau) @ T_w2c
-
-#     new_R = new_w2c[0:3, 0:3]
-#     new_T = new_w2c[0:3, 3]
-
-#     converged = tau.norm() < converged_threshold
-#     camera.update_RT(new_R.T, new_T) # 记得转回去
-#     camera.cam_rot_delta.data.fill_(0)
-#     camera.cam_trans_delta.data.fill_(0)
-#     camera.update_W2C = False
-#     camera.update_W2I = False
-#     camera.update_center = False
-#     return converged
-def update_pose(camera, cam_trans_delta, cam_rot_delta, global_transform, update_global, converged_threshold=1e-4):
-    tau = torch.cat([cam_trans_delta, cam_rot_delta], dim=0)
+def update_pose(camera, converged_threshold=1e-4):
+    tau = torch.cat([camera.cam_trans_delta, camera.cam_rot_delta], axis=0)
 
     T_w2c = torch.eye(4, device=tau.device)
     R_pose = camera.R # 注意camera里的R是W2C.R的转置
@@ -204,36 +160,15 @@ def update_pose(camera, cam_trans_delta, cam_rot_delta, global_transform, update
     T_w2c[0:3, 3] = camera.T
 
     new_w2c = SE3_exp(tau) @ T_w2c
-    if update_global:
-        new_global_transform = SE3_exp(tau) @ global_transform # global transform左乘新来的相机的W2C
-    else:
-        new_global_transform = global_transform
+
     new_R = new_w2c[0:3, 0:3]
     new_T = new_w2c[0:3, 3]
 
     converged = tau.norm() < converged_threshold
-    
-    # cam_rot_delta.data.fill_(0)
-    # cam_trans_delta.data.fill_(0)
     camera.update_RT(new_R.T, new_T) # 记得转回去
+    camera.cam_rot_delta.data.fill_(0)
+    camera.cam_trans_delta.data.fill_(0)
     camera.update_W2C = False
     camera.update_W2I = False
     camera.update_center = False
-    return converged, new_global_transform
-
-from copy import deepcopy
-def update_pose_by_global(camera, global_transform):
-    new_camera = deepcopy(camera)
-    T_w2c = torch.eye(4, device=global_transform.device)
-    R_pose = new_camera.R # 注意camera里的R是W2C.R的转置
-    T_w2c[0:3, 0:3] = R_pose.T
-    T_w2c[0:3, 3] = new_camera.T
-    
-    new_w2c = global_transform @ T_w2c
-    new_R = new_w2c[0:3, 0:3]
-    new_T = new_w2c[0:3, 3]
-    new_camera.update_RT(new_R.T, new_T) # 记得转回去
-    new_camera.update_W2C = False
-    new_camera.update_W2I = False
-    new_camera.update_center = False
-    return new_camera
+    return converged

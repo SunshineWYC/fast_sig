@@ -22,9 +22,7 @@ We present a fast 3DGS reconstruction pipeline designed to converge within one m
 - Initialization from feed-forward 3DGS model based on [AnySplat](https://github.com/InternRobotics/AnySplat);
 - Multi-view consistency-guided densification and pruning strategy inspired by [Fast-GS](https://github.com/fastgs/FastGS);
 - Supervise the rendered depth by depth estimator [Metric3D](https://github.com/YvanYin/Metric3D);
-- Optional global transform on camera extrinsics.
-
-In addation, We tried using [Neural Gaussians](https://github.com/city-super/Scaffold-GS) to replace original 3DGS for fast convergence with few parameters. Switch to the `use_scaffold_release` branch for details.
+- Per-camera pose refinement on camera extrinsics.
 
 ## TODO
 
