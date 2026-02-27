@@ -54,6 +54,7 @@ class Camera(nn.Module):
         self.cam_trans_delta = nn.Parameter(
             torch.zeros(3, requires_grad=True, device=self.data_device)
         )
+        self.pose_optimizer = None
         
         
         resized_image_rgb = PILtoTorch(image, resolution)
@@ -95,6 +96,13 @@ class Camera(nn.Module):
 
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
         
+    def init_pose_optimizer(self, rot_lr, trans_lr):
+        params = [
+            {"params": [self.cam_rot_delta], "lr": rot_lr, "name": f"pose_rot_delta_{self.uid}"},
+            {"params": [self.cam_trans_delta], "lr": trans_lr, "name": f"pose_trans_delta_{self.uid}"},
+        ]
+        self.pose_optimizer = torch.optim.Adam(params)
+
     def update_RT(self, R, t):
         self.R = R.to(device=self.data_device)
         self.T = t.to(device=self.data_device)

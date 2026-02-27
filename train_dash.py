@@ -95,13 +95,9 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
 
-    pose_optimizer = None
     if opt.use_pose_optimization:
-        pose_l = []
         for cam in scene.getTrainCameras():
-            pose_l.append({'params': [cam.cam_rot_delta], 'lr': opt.pose_rot_lr, "name": f"pose_rot_delta_{cam.uid}"})
-            pose_l.append({'params': [cam.cam_trans_delta], 'lr': opt.pose_trans_lr, "name": f"pose_trans_delta_{cam.uid}"})
-        pose_optimizer = torch.optim.Adam(pose_l)
+            cam.init_pose_optimizer(opt.pose_rot_lr, opt.pose_trans_lr)
     
     render_scale = scheduler.get_res_scale(1)
     for iteration in range(first_iter, opt.iterations + 1):
@@ -116,6 +112,12 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
         viewpoint_indices = list(range(len(viewpoint_stack)))
         rand_idx = randint(0, len(viewpoint_indices) - 1)
         viewpoint_cam = viewpoint_stack.pop(rand_idx)
+
+        pose_active = (
+            opt.use_pose_optimization
+            and iteration > opt.pose_update_from
+            and iteration < opt.pose_update_until
+        )
 
         # Render
         if (iteration - 1) == debug_from:
@@ -136,8 +138,8 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
             use_trained_exp=dataset.train_test_exp,
             separate_sh=SPARSE_ADAM_AVAILABLE,
             render_size=gt_image.shape[-2:],
-            cam_rot_delta=viewpoint_cam.cam_rot_delta,
-            cam_trans_delta=viewpoint_cam.cam_trans_delta,
+            cam_rot_delta=viewpoint_cam.cam_rot_delta if pose_active else None,
+            cam_trans_delta=viewpoint_cam.cam_trans_delta if pose_active else None,
         )
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
@@ -197,7 +199,7 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                     camlist = sampling_cameras(sample_view_stack)
                     
                     importance_score, pruning_score = compute_gaussian_score_fastgs(
-                        camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=True
+                        camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=True, pose_active=pose_active
                     )
                     momentum_add = gaussians.densify_and_prune_fastgs(max_screen_size = size_threshold, 
                                             max_grad=0.005,
@@ -228,9 +230,9 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none = True)
 
-                if pose_optimizer is not None:
-                    pose_optimizer.step()
-                    pose_optimizer.zero_grad(set_to_none=True)
+                if pose_active and viewpoint_cam.pose_optimizer is not None:
+                    viewpoint_cam.pose_optimizer.step()
+                    viewpoint_cam.pose_optimizer.zero_grad(set_to_none=True)
             
             # Update camera poses
             if (

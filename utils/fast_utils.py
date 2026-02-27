@@ -46,7 +46,7 @@ def normalize(config_value, value_tensor):
 
     return ret_value
 
-def compute_gaussian_score_fastgs(camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=False):
+def compute_gaussian_score_fastgs(camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=False, pose_active=True):
     """Compute multi-view consistency scores for Gaussians to guide densification.
 
     For each camera in `camlist` the function renders the scene and computes a
@@ -86,8 +86,8 @@ def compute_gaussian_score_fastgs(camlist, gaussians, dataset, opt, pipe, bg, DE
             render_size=gt_image.shape[-2:],
             use_trained_exp=dataset.train_test_exp,
             retain_grad=False,
-            cam_rot_delta=view_cam.cam_rot_delta,
-            cam_trans_delta=view_cam.cam_trans_delta,
+            cam_rot_delta=view_cam.cam_rot_delta if pose_active else None,
+            cam_trans_delta=view_cam.cam_trans_delta if pose_active else None,
         )["render"]
         photometric_loss = compute_photometric_loss(view_cam, render_image)
 
@@ -105,8 +105,8 @@ def compute_gaussian_score_fastgs(camlist, gaussians, dataset, opt, pipe, bg, DE
             separate_sh=SPARSE_ADAM_AVAILABLE,
             render_size=gt_image.shape[-2:],
             use_trained_exp=dataset.train_test_exp,
-            cam_rot_delta=view_cam.cam_rot_delta,
-            cam_trans_delta=view_cam.cam_trans_delta,
+            cam_rot_delta=view_cam.cam_rot_delta if pose_active else None,
+            cam_trans_delta=view_cam.cam_trans_delta if pose_active else None,
             retain_grad=False,
             get_flag=get_flag,
             metric_map=metric_map,
