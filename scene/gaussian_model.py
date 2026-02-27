@@ -12,7 +12,6 @@
 import torch
 from functools import reduce
 import numpy as np
-from torch_scatter import scatter_max
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from torch import nn
 import os
