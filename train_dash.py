@@ -15,7 +15,6 @@ from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.schedule_utils import TrainingScheduler
-from utils.fast_utils import sampling_cameras, compute_gaussian_score_fastgs
 from utils.pose_refine_utils import export_refined_colmap_model
 import cv2
 import json
@@ -178,40 +177,27 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
             ema_Ll1depth_for_log = 0.4 * Ll1depth + 0.6 * ema_Ll1depth_for_log
 
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{4}f}", "Ll1depth": f"{ema_Ll1depth_for_log:.{4}f}", "N_GS": f"{gaussians._scaling.shape[0]}", "N_MAX": f"{scheduler.max_n_gaussian}", "R": f"{render_scale}"})
+                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{4}f}", "Ll1depth": f"{ema_Ll1depth_for_log:.{4}f}", "N_GS": f"{gaussians._scaling.shape[0]}", "R": f"{render_scale}"})
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
                 
             # Densification and pruning
             if iteration < opt.densify_until_iter:
-                # Keep track of max radii in image-space for pruning
+                # track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    # Apply DashGaussian primitive scheduler to control densification.
-                    densify_rate = scheduler.get_densify_rate(iteration, gaussians.get_xyz.shape[0], render_scale)
-                    
-                    # Use fastgs strategy for densifing and pruning score computation
-                    sample_view_stack = scene.getTrainCameras().copy()
-                    camlist = sampling_cameras(sample_view_stack)
-                    
-                    importance_score, pruning_score = compute_gaussian_score_fastgs(
-                        camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=True, pose_active=pose_active
+                    gaussians.densify_and_prune(
+                        opt.densify_grad_threshold,
+                        0.005,
+                        scene.cameras_extent,
+                        size_threshold,
+                        radii,
                     )
-                    momentum_add = gaussians.densify_and_prune_fastgs(max_screen_size = size_threshold, 
-                                            max_grad=0.005,
-                                            min_opacity = 0.005, 
-                                            extent = scene.cameras_extent, 
-                                            args = opt,
-                                            importance_score = importance_score,
-                                            pruning_score = pruning_score)
-                    
-                    # Update max_n_gaussian
-                    scheduler.update_momentum(momentum_add)
-                    # Update render scale based on the DashGaussian resolution scheduler. 
+
                     render_scale = scheduler.get_res_scale(iteration)
 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
