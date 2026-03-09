@@ -1,9 +1,9 @@
-
-
 import torch
 import numpy as np
 import os
 import json
+import lpips
+import cv2
 from scene.gaussian_model import GaussianModel
 import sys
 from train import eval
@@ -11,11 +11,77 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from scene import Scene
 from gaussian_renderer import render
 from argparse import ArgumentParser, Namespace
+from utils.loss_utils import l1_loss, ssim
+from utils.image_utils import psnr
+
 try:
     from diff_gaussian_rasterization import SparseGaussianAdam
     SPARSE_ADAM_AVAILABLE = True
 except:
     SPARSE_ADAM_AVAILABLE = False
+
+lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
+
+
+def eval(dataset, pipe, case_name, scene : Scene, renderFunc, renderArgs, iteration: int, time: int, log_file=None):
+    torch.cuda.empty_cache()
+    config = {'name': 'train', 'cameras' : scene.getTrainCameras()}
+    (pipe, background, scale_factor, SPARSE_ADAM_AVAILABLE, overide_color, train_test_exp) = renderArgs
+    if config['cameras'] and len(config['cameras']) > 0:
+        l1_test = 0.0
+        psnr_test = 0.0
+        lpips_test = 0.0
+        ssim_test = 0.0
+        for idx, viewpoint in enumerate(config['cameras']):
+            image = torch.clamp(
+                renderFunc(
+                    viewpoint,
+                    scene.gaussians,
+                    *renderArgs,
+                    train_cameras=scene.getTrainCameras() if train_test_exp else None,
+                )["render"],
+                0.0,
+                1.0,
+            )
+
+            gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
+            l1_test += l1_loss(image, gt_image).mean().double()
+            psnr_test += psnr(image, gt_image).mean().double()
+            lpips_test += lpips_fn(image, gt_image).mean().double()
+            ssim_test += ssim(image, gt_image).mean().double()
+            image_write = image.permute(1,2,0).detach().cpu().numpy()
+            image_write = (image_write * 255).astype("uint8")
+            os.makedirs(f"{scene.model_path}/test/", exist_ok = True)
+            cv2.imwrite(
+                os.path.join(
+                    f"{scene.model_path}/test/",
+                    "{}_{}_iter{:06d}.png".format(config['name'], viewpoint.image_name, iteration),
+                ),
+                cv2.cvtColor(image_write, cv2.COLOR_RGB2BGR),
+            )
+        
+        psnr_test /= len(config['cameras'])
+        l1_test /= len(config['cameras'])
+        lpips_test /= len(config['cameras'])
+        ssim_test /= len(config['cameras'])
+        print("\n[ITER {}] Evaluating {}sec: L1 {} PSNR {} LPIPS {} SSIM {}".format(iteration, time, l1_test, psnr_test, lpips_test, ssim_test))
+        
+        if log_file is not None:
+            data = {}
+            if os.path.exists(log_file):
+                with open(log_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+            t_val = f"{float(time):.2f}"
+            psnr_val = f"{float(psnr_test):.4f}"
+
+            data[case_name] = {
+                "PSNR": psnr_val,
+                "time": t_val
+            }
+
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)   
 
         
 if __name__ == "__main__":

@@ -3,7 +3,6 @@ import sys
 import numpy as np
 import torch
 import time
-import lpips
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from utils.camera_utils import update_pose
@@ -11,16 +10,13 @@ from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state, get_expon_lr_func
 from tqdm import tqdm
-from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.schedule_utils import TrainingScheduler
 from utils.fast_utils import sampling_cameras, compute_gaussian_score_fastgs
 from utils.pose_refine_utils import export_refined_colmap_model
-import cv2
 import json
 
-lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -48,28 +44,10 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
 
     first_iter = 0
     
-    # Optional: Feed-forward Gaussians from AnySplat
-    FF_gaussians = None
-    pred_all_extrinsic = None
-    pred_all_intrinsic = None
-    if getattr(pipe, "use_anysplat_init", False):
-        from utils.anysplat_utils import anySplat
-
-        FF_gaussians, pred_all_extrinsic, pred_all_intrinsic = anySplat(dataset, opt, pipe)
-        FF_gaussians.xyz_gradient_accum = torch.zeros(
-            (FF_gaussians.get_xyz.shape[0], 1),
-            device=FF_gaussians.get_xyz.device,
-        )
-        FF_gaussians.denom = torch.zeros(
-            (FF_gaussians.get_xyz.shape[0], 1),
-            device=FF_gaussians.get_xyz.device,
-        )
-
     # Init Scene and Gaussains
     gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
-    scene = Scene(dataset, gaussians, pipe, FF_gaussians, shuffle=False)
+    scene = Scene(dataset, gaussians, pipe, None, shuffle=False)
     gaussians = scene.gaussians
-    del FF_gaussians
     torch.cuda.empty_cache()
     
     gaussians.training_setup(opt)
@@ -263,65 +241,6 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
     )
     scene.gaussians.save_ply(os.path.join(pose_refined_dir, "gs_points.ply"))
 
-def eval(dataset, pipe, case_name, scene : Scene, renderFunc, renderArgs, iteration: int, time: int, log_file=None):
-    torch.cuda.empty_cache()
-    config = {'name': 'train', 'cameras' : scene.getTrainCameras()}
-    (pipe, background, scale_factor, SPARSE_ADAM_AVAILABLE, overide_color, train_test_exp) = renderArgs
-    if config['cameras'] and len(config['cameras']) > 0:
-        l1_test = 0.0
-        psnr_test = 0.0
-        lpips_test = 0.0
-        ssim_test = 0.0
-        for idx, viewpoint in enumerate(config['cameras']):
-            image = torch.clamp(
-                renderFunc(
-                    viewpoint,
-                    scene.gaussians,
-                    *renderArgs,
-                    train_cameras=scene.getTrainCameras() if train_test_exp else None,
-                )["render"],
-                0.0,
-                1.0,
-            )
-
-            gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-            l1_test += l1_loss(image, gt_image).mean().double()
-            psnr_test += psnr(image, gt_image).mean().double()
-            lpips_test += lpips_fn(image, gt_image).mean().double()
-            ssim_test += ssim(image, gt_image).mean().double()
-            image_write = image.permute(1,2,0).detach().cpu().numpy()
-            image_write = (image_write * 255).astype("uint8")
-            os.makedirs(f"{scene.model_path}/test/", exist_ok = True)
-            cv2.imwrite(
-                os.path.join(
-                    f"{scene.model_path}/test/",
-                    "{}_{}_iter{:06d}.png".format(config['name'], viewpoint.image_name, iteration),
-                ),
-                cv2.cvtColor(image_write, cv2.COLOR_RGB2BGR),
-            )
-        
-        psnr_test /= len(config['cameras'])
-        l1_test /= len(config['cameras'])
-        lpips_test /= len(config['cameras'])
-        ssim_test /= len(config['cameras'])
-        print("\n[ITER {}] Evaluating {}sec: L1 {} PSNR {} LPIPS {} SSIM {}".format(iteration, time, l1_test, psnr_test, lpips_test, ssim_test))
-        
-        if log_file is not None:
-            data = {}
-            if os.path.exists(log_file):
-                with open(log_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-
-            t_val = f"{float(time):.2f}"
-            psnr_val = f"{float(psnr_test):.4f}"
-
-            data[case_name] = {
-                "PSNR": psnr_val,
-                "time": t_val
-            }
-
-            with open(log_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)       
 
 
 if __name__ == "__main__":
