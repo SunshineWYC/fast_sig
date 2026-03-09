@@ -74,7 +74,6 @@ for case in "${CASES[@]}"; do
         $root_dir -m $model_dir -r 2 \
         --resolution_mode freq \
         --densify_until_iter $densify_until_iter \
-        --densify_mode freq \
         --disable_viewer \
         --antialiasing \
         --optimizer_type sparse_adam \

@@ -73,14 +73,14 @@ class PipelineParams(ParamGroup):
         self.antialiasing = True
         # DashGaussian parameters
         self.resolution_mode = "freq"
-        self.densify_mode = "freq"
         self.max_n_gaussian = 1000000
         self.FF_downsample=8
         super().__init__(parser, "Pipeline Parameters")
 
+
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
-        self.iterations = 10_000
+        self.iterations = 30_000
         
         self.offset_lr_init = 0.01
         self.offset_lr_final = 0.0001
@@ -119,6 +119,13 @@ class OptimizationParams(ParamGroup):
         self.random_background = False
         self.optimizer_type = "default"
 
+        # MCMC parameters
+        self.use_mcmc = True
+        self.opacity_reg = 0.01
+        self.scale_reg = 0.01
+        self.noise_lr = 5e5
+
+        # pose optimization parameters
         self.use_pose_optimization = True
         self.pose_rot_lr = 0.00008
         self.pose_trans_lr = 0.00005
@@ -126,11 +133,6 @@ class OptimizationParams(ParamGroup):
         self.pose_update_interval = 400
         self.pose_update_until = 15_000
         
-        # faster parameters
-        self.loss_thresh = 0.1
-        self.grad_thresh = 0.0002
-        self.dense = 0.001
-        self.grad_abs_thresh = 0.0012  
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

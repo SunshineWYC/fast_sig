@@ -8,12 +8,11 @@ from utils.loss_utils import l1_loss, ssim
 from utils.camera_utils import update_pose
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
-from utils.general_utils import safe_state, get_expon_lr_func
+from utils.general_utils import safe_state, get_expon_lr_func, build_scaling_rotation
 from tqdm import tqdm
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.schedule_utils import TrainingScheduler
-from utils.fast_utils import sampling_cameras, compute_gaussian_score_fastgs
 from utils.pose_refine_utils import export_refined_colmap_model
 import json
 
@@ -81,7 +80,8 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
     for iteration in range(first_iter, opt.iterations + 1):
 
         iter_start.record()
-        gaussians.update_learning_rate(iteration)
+        xyz_lr = gaussians.update_learning_rate(iteration)
+        render_scale = scheduler.get_res_scale(iteration)
 
         # Pick a random Camera
         if not viewpoint_stack:
@@ -145,6 +145,11 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
             Ll1depth = Ll1depth.item()
         else:
             Ll1depth = 0
+        
+        # MCMC loss
+        if opt.use_mcmc:
+            loss = loss + opt.opacity_reg * torch.abs(gaussians.get_opacity).mean()
+            loss = loss + opt.scale_reg * torch.abs(gaussians.get_scaling).mean()
 
         loss.backward()
 
@@ -161,39 +166,16 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
             if iteration == opt.iterations:
                 progress_bar.close()
                 
-            # Densification and pruning
-            if iteration < opt.densify_until_iter:
-                # Keep track of max radii in image-space for pruning
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    # Apply DashGaussian primitive scheduler to control densification.
-                    densify_rate = scheduler.get_densify_rate(iteration, gaussians.get_xyz.shape[0], render_scale)
-                    
-                    # Use fastgs strategy for densifing and pruning score computation
-                    sample_view_stack = scene.getTrainCameras().copy()
-                    camlist = sampling_cameras(sample_view_stack)
-                    
-                    importance_score, pruning_score = compute_gaussian_score_fastgs(
-                        camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=True, pose_active=pose_active
-                    )
-                    momentum_add = gaussians.densify_and_prune_fastgs(max_screen_size = size_threshold, 
-                                                                      max_grad=0.005,
-                                                                      min_opacity = 0.005,
-                                                                      extent = scene.cameras_extent, 
-                                                                      args = opt,
-                                                                      importance_score = importance_score,
-                                                                      pruning_score = pruning_score)
-
-                    # Update max_n_gaussian
-                    scheduler.update_momentum(momentum_add)
-                    # Update render scale based on the DashGaussian resolution scheduler. 
-                    render_scale = scheduler.get_res_scale(iteration)
-
-                if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
-                    gaussians.reset_opacity()
+            # MCMC densification
+            if (
+                opt.use_mcmc
+                and iteration < opt.densify_until_iter
+                and iteration > opt.densify_from_iter
+                and iteration % opt.densification_interval == 0
+            ):
+                dead_mask = (gaussians.get_opacity <= opt.min_opacity).squeeze(-1)
+                gaussians.relocate_gs(dead_mask=dead_mask)
+                gaussians.add_new_gs(cap_max=pipe.max_n_gaussian)
 
             # Optimizer step
             if iteration < opt.iterations:
@@ -207,6 +189,23 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                 else:
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none = True)
+
+                if opt.use_mcmc:
+                    # MCMC noise SGLD addition
+                    L = build_scaling_rotation(gaussians.get_scaling, gaussians.get_rotation)
+                    actual_covariance = L @ L.transpose(1, 2)
+
+                    def op_sigmoid(x, k=100, x0=0.995):
+                        return 1 / (1 + torch.exp(-k * (x - x0)))
+
+                    noise = (
+                        torch.randn_like(gaussians._xyz)
+                        * op_sigmoid(1 - gaussians.get_opacity)
+                        * opt.noise_lr
+                        * xyz_lr
+                    )
+                    noise = torch.bmm(actual_covariance, noise.unsqueeze(-1)).squeeze(-1)
+                    gaussians._xyz.add_(noise)
 
                 if pose_active and viewpoint_cam.pose_optimizer is not None:
                     viewpoint_cam.pose_optimizer.step()
