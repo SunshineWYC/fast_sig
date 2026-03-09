@@ -6,7 +6,7 @@ import os
 import json
 from scene.gaussian_model import GaussianModel
 import sys
-from train_dash import eval
+from train import eval
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from scene import Scene
 from gaussian_renderer import render

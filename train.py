@@ -202,13 +202,13 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                         camlist, gaussians, dataset, opt, pipe, bg, DENSIFY=True, pose_active=pose_active
                     )
                     momentum_add = gaussians.densify_and_prune_fastgs(max_screen_size = size_threshold, 
-                                            max_grad=0.005,
-                                            min_opacity = 0.005, 
-                                            extent = scene.cameras_extent, 
-                                            args = opt,
-                                            importance_score = importance_score,
-                                            pruning_score = pruning_score)
-                    
+                                                                      max_grad=0.005,
+                                                                      min_opacity = 0.005,
+                                                                      extent = scene.cameras_extent, 
+                                                                      args = opt,
+                                                                      importance_score = importance_score,
+                                                                      pruning_score = pruning_score)
+
                     # Update max_n_gaussian
                     scheduler.update_momentum(momentum_add)
                     # Update render scale based on the DashGaussian resolution scheduler. 
