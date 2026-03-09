@@ -71,8 +71,6 @@ class PipelineParams(ParamGroup):
         self.compute_cov3D_python = False
         self.debug = False
         self.antialiasing = True
-        # Optional initialization
-        self.use_anysplat_init = False
         # DashGaussian parameters
         self.resolution_mode = "freq"
         self.densify_mode = "freq"
@@ -82,7 +80,7 @@ class PipelineParams(ParamGroup):
 
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
-        self.iterations = 30_000
+        self.iterations = 10_000
         
         self.offset_lr_init = 0.01
         self.offset_lr_final = 0.0001
