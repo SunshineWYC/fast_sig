@@ -73,7 +73,7 @@ class PipelineParams(ParamGroup):
         self.antialiasing = True
         # DashGaussian parameters
         self.resolution_mode = "freq"
-        self.max_n_gaussian = 1000000
+        self.max_n_gaussian = 1_000_000
         self.FF_downsample=8
         super().__init__(parser, "Pipeline Parameters")
 
@@ -124,6 +124,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_reg = 0.01
         self.scale_reg = 0.01
         self.noise_lr = 5e5
+        self.new_gaussian_ratio = 1.02
 
         # pose optimization parameters
         self.use_pose_optimization = True

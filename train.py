@@ -175,7 +175,7 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
             ):
                 dead_mask = (gaussians.get_opacity <= opt.min_opacity).squeeze(-1)
                 gaussians.relocate_gs(dead_mask=dead_mask)
-                gaussians.add_new_gs(cap_max=pipe.max_n_gaussian)
+                gaussians.add_new_gs(cap_max=pipe.max_n_gaussian, new_gaussian_ratio=opt.new_gaussian_ratio)
 
             # Optimizer step
             if iteration < opt.iterations:

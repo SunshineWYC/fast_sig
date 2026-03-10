@@ -676,12 +676,12 @@ class GaussianModel:
         self._scaling[reinit_idx] = self._scaling[dead_indices]
         self.replace_tensors_to_optimizer(inds=reinit_idx)
 
-    def add_new_gs(self, cap_max):
+    def add_new_gs(self, cap_max, new_gaussian_ratio=1.05):
         current_num_points = self._opacity.shape[0]
         if cap_max <= 0:
             return 0
 
-        target_num = min(cap_max, int(1.05 * current_num_points))
+        target_num = min(cap_max, int(new_gaussian_ratio * current_num_points))
         num_gs = max(0, target_num - current_num_points)
         if num_gs <= 0:
             return 0
