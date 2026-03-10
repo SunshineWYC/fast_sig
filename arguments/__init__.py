@@ -124,7 +124,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_reg = 0.01
         self.scale_reg = 0.01
         self.noise_lr = 5e5
-        self.new_gaussian_ratio = 1.05
+        self.new_gaussian_ratio = 1.03
 
         # 3D bilateral grid parameters
         self.use_bilgrid_3d = True

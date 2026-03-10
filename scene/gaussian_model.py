@@ -32,7 +32,7 @@ except:
     pass
 
 
-class GaussianModel:
+class GaussianModel(object):
 
     def setup_functions(self):
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
@@ -51,13 +51,14 @@ class GaussianModel:
 
         self.rotation_activation = torch.nn.functional.normalize
 
-        # MCMC densificaiton params
+        # MCMC densification params
         N_max = 51
         binoms = torch.zeros((N_max, N_max), device="cuda", dtype=torch.float32)
         for n in range(N_max):
             for k in range(n + 1):
-                self.binoms[n, k] = math.comb(n, k)
-        self.register_buffer("binoms", binoms, persistent=False)
+                binoms[n, k] = math.comb(n, k)
+        self.binoms = binoms
+
 
     def __init__(self, sh_degree, optimizer_type="default"):
 
