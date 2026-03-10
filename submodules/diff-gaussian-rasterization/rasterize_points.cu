@@ -21,6 +21,7 @@
 #include "cuda_rasterizer/config.h"
 #include "cuda_rasterizer/rasterizer.h"
 #include "cuda_rasterizer/adam.h"
+#include "cuda_rasterizer/utils.h"
 #include <fstream>
 #include <string>
 #include <functional>
@@ -490,5 +491,57 @@ RasterizeGaussiansSimpCUDA(
 		rendered = std::get<0>(tup);
 		num_buckets = std::get<1>(tup);
   }
-  return std::make_tuple(rendered, num_buckets, out_color, out_invdepth, radii, geomBuffer, binningBuffer, imgBuffer, sampleBuffer, accum_weights_ptr, accum_weights_count, accum_max_count);
+	  return std::make_tuple(rendered, num_buckets, out_color, out_invdepth, radii, geomBuffer, binningBuffer, imgBuffer, sampleBuffer, accum_weights_ptr, accum_weights_count, accum_max_count);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> ComputeRelocationCUDA(
+	const torch::Tensor& opacity_old,
+	const torch::Tensor& scale_old,
+	const torch::Tensor& N,
+	const torch::Tensor& binoms,
+	const int n_max)
+{
+	TORCH_CHECK(opacity_old.is_cuda(), "opacity_old must be a CUDA tensor");
+	TORCH_CHECK(scale_old.is_cuda(), "scale_old must be a CUDA tensor");
+	TORCH_CHECK(N.is_cuda(), "N must be a CUDA tensor");
+	TORCH_CHECK(binoms.is_cuda(), "binoms must be a CUDA tensor");
+
+	TORCH_CHECK(opacity_old.scalar_type() == torch::kFloat32, "opacity_old must be float32");
+	TORCH_CHECK(scale_old.scalar_type() == torch::kFloat32, "scale_old must be float32");
+	TORCH_CHECK(N.scalar_type() == torch::kInt32, "N must be int32");
+	TORCH_CHECK(binoms.scalar_type() == torch::kFloat32, "binoms must be float32");
+
+	TORCH_CHECK(opacity_old.dim() == 1, "opacity_old must have shape [P]");
+	TORCH_CHECK(scale_old.dim() == 2 && scale_old.size(1) == 3, "scale_old must have shape [P, 3]");
+	TORCH_CHECK(N.dim() == 1, "N must have shape [P]");
+	TORCH_CHECK(binoms.dim() == 2, "binoms must have shape [n_max, n_max]");
+	TORCH_CHECK(n_max > 0, "n_max must be positive");
+	TORCH_CHECK(binoms.size(0) >= n_max && binoms.size(1) >= n_max, "binoms shape is smaller than n_max");
+
+	const int P = opacity_old.size(0);
+	TORCH_CHECK(scale_old.size(0) == P, "scale_old first dimension must match opacity_old");
+	TORCH_CHECK(N.size(0) == P, "N size must match opacity_old");
+
+	TORCH_CHECK(opacity_old.is_contiguous(), "opacity_old must be contiguous");
+	TORCH_CHECK(scale_old.is_contiguous(), "scale_old must be contiguous");
+	TORCH_CHECK(N.is_contiguous(), "N must be contiguous");
+	TORCH_CHECK(binoms.is_contiguous(), "binoms must be contiguous");
+
+	torch::Tensor final_opacity = torch::zeros({P}, opacity_old.options().dtype(torch::kFloat32));
+	torch::Tensor final_scale = torch::zeros({P, 3}, scale_old.options().dtype(torch::kFloat32));
+
+	if (P != 0)
+	{
+		UTILS::ComputeRelocation(
+			P,
+			opacity_old.data_ptr<float>(),
+			scale_old.data_ptr<float>(),
+			N.data_ptr<int>(),
+			binoms.data_ptr<float>(),
+			n_max,
+			final_opacity.data_ptr<float>(),
+			final_scale.data_ptr<float>());
+	}
+
+	return std::make_tuple(final_opacity, final_scale);
 }

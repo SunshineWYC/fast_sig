@@ -21,4 +21,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("adamUpdate", &adamUpdate);
   m.def("fusedssim", &fusedssim);
   m.def("fusedssim_backward", &fusedssim_backward);
+  m.def("compute_relocation", &ComputeRelocationCUDA);
 }

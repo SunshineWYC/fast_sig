@@ -1,0 +1,16 @@
+LICENSE.md
+README.md
+conv.cu
+ext.cpp
+rasterize_points.cu
+setup.py
+/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/pip-modern-metadata-b95ofczh/diff_gaussian_rasterization.egg-info/PKG-INFO
+/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/pip-modern-metadata-b95ofczh/diff_gaussian_rasterization.egg-info/SOURCES.txt
+/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/pip-modern-metadata-b95ofczh/diff_gaussian_rasterization.egg-info/dependency_links.txt
+/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/pip-modern-metadata-b95ofczh/diff_gaussian_rasterization.egg-info/top_level.txt
+cuda_rasterizer/adam.cu
+cuda_rasterizer/backward.cu
+cuda_rasterizer/forward.cu
+cuda_rasterizer/rasterizer_impl.cu
+cuda_rasterizer/utils.cu
+diff_gaussian_rasterization/__init__.py

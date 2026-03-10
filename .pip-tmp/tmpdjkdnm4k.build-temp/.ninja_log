@@ -1,0 +1,6 @@
+# ninja log v5
+1	547	1773050492544714940	/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/tmpdjkdnm4k.build-temp/cuda_rasterizer/utils.o	d09fc851cd75ed6b
+1	1565	1773050493560678486	/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/tmpdjkdnm4k.build-temp/cuda_rasterizer/adam.o	904bc90994b47f2b
+1	2095	1773050494088659539	/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/tmpdjkdnm4k.build-temp/cuda_rasterizer/backward.o	560d4202e6729e6c
+1	3061	1773050495052624934	/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/tmpdjkdnm4k.build-temp/cuda_rasterizer/forward.o	ead8ae630f2af62d
+1	6376	1773050498364505963	/home/wyc/Workspace/efficient_3dgs/fastgs_sig/.pip-tmp/tmpdjkdnm4k.build-temp/cuda_rasterizer/rasterizer_impl.o	dcda6c154f6f1dc3

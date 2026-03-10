@@ -34,7 +34,7 @@ try:
     SPARSE_ADAM_AVAILABLE = True
 except:
     SPARSE_ADAM_AVAILABLE = False
-    
+
 
 def training(dataset, opt, pipe, debug_from, log_file=None):
 
@@ -48,7 +48,7 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
     scene = Scene(dataset, gaussians, pipe, None, shuffle=False)
     gaussians = scene.gaussians
     torch.cuda.empty_cache()
-    
+
     gaussians.training_setup(opt)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]

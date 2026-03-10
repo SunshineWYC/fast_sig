@@ -22,7 +22,8 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
-from utils.reloc_utils import compute_relocation
+from utils.reloc_utils import compute_relocation_cuda as compute_relocation
+
 
 try:
     from diff_gaussian_rasterization import SparseGaussianAdam

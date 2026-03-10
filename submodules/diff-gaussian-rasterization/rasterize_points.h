@@ -153,3 +153,10 @@ RasterizeGaussiansSimpCUDA(
 	const bool antialiasing,
 	const bool pruning,
 	const bool debug);
+
+std::tuple<torch::Tensor, torch::Tensor> ComputeRelocationCUDA(
+	const torch::Tensor& opacity_old,
+	const torch::Tensor& scale_old,
+	const torch::Tensor& N,
+	const torch::Tensor& binoms,
+	const int n_max);

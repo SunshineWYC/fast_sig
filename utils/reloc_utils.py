@@ -1,35 +1,35 @@
 import math
-from typing import Dict, Tuple
 
 import torch
+from diff_gaussian_rasterization import compute_relocation as _compute_relocation
 
-N_MAX = 51
-_BINOM_CACHE: Dict[Tuple[torch.device, torch.dtype], torch.Tensor] = {}
+N_max = 51
+_BINOMS = {}
 
 
-def _get_binoms(device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-    key = (device, dtype)
-    cached = _BINOM_CACHE.get(key)
+def _get_binoms(device: torch.device, dtype: torch.dtype = torch.float32):
+    cached = _BINOMS.get(device)
     if cached is not None:
-        return cached
+        return cached.to(dtype=dtype)
 
-    binoms = torch.zeros((N_MAX, N_MAX), device=device, dtype=dtype)
-    for n in range(N_MAX):
+    binoms = torch.zeros((N_max, N_max), device=device, dtype=torch.float32)
+    for n in range(N_max):
         for k in range(n + 1):
             binoms[n, k] = math.comb(n, k)
+    _BINOMS[device] = binoms
+    return binoms.to(dtype=dtype)
 
-    _BINOM_CACHE[key] = binoms
-    return binoms
+
+def compute_relocation_cuda(opacity_old, scale_old, N):
+    N = N.to(device=opacity_old.device, dtype=torch.int32).contiguous()
+    N.clamp_(min=1, max=N_max - 1)
+    binoms = _get_binoms(opacity_old.device).contiguous()
+    return _compute_relocation(opacity_old, scale_old, N, binoms, N_max)
 
 
-def compute_relocation(opacity_old: torch.Tensor, scale_old: torch.Tensor, N: torch.Tensor):
+def compute_relocation(opacity_old, scale_old, N):
     """
-    Torch implementation of Eq.(9) from 3DGS-MCMC.
-
-    Args:
-        opacity_old: (P,) tensor in [0, 1]
-        scale_old: (P, 3) positive scales
-        N: (P,) integer relocation multiplicity
+    Original Python/Torch implementation of Eq.(9) from 3DGS-MCMC.
     """
     if opacity_old.ndim != 1:
         opacity_old = opacity_old.reshape(-1)
@@ -42,14 +42,14 @@ def compute_relocation(opacity_old: torch.Tensor, scale_old: torch.Tensor, N: to
     dtype = opacity_old.dtype
     eps = torch.finfo(dtype).eps
 
-    N = N.to(device=device, dtype=torch.long).clamp_(min=1, max=N_MAX - 1)
+    N = N.to(device=device, dtype=torch.long).clamp_(min=1, max=N_max - 1)
     opacity_old = opacity_old.clamp(min=eps, max=1.0 - eps)
 
     opacity_new = 1.0 - torch.pow(1.0 - opacity_old, 1.0 / N.to(dtype))
     denom_sum = torch.zeros_like(opacity_old)
     binoms = _get_binoms(device, dtype)
 
-    for i in range(1, N_MAX):
+    for i in range(1, N_max):
         active = N >= i
         if not torch.any(active):
             break

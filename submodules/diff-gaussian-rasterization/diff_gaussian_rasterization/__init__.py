@@ -14,6 +14,9 @@ import torch.nn as nn
 import torch
 from . import _C
 
+_RELOC_N_MAX_DEFAULT = 51
+_RELOC_BINOM_CACHE = {}
+
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
     return tuple(copied_tensors)
@@ -46,6 +49,56 @@ def rasterize_gaussians(
         rho,
         raster_settings,
     )
+
+def _get_relocation_binoms(device, n_max):
+    key = (device, int(n_max))
+    cached = _RELOC_BINOM_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    binoms = torch.zeros((n_max, n_max), device=device, dtype=torch.float32)
+    for n in range(n_max):
+        for k in range(n + 1):
+            # Build Pascal triangle directly on GPU tensor.
+            if k == 0 or k == n:
+                binoms[n, k] = 1.0
+            else:
+                binoms[n, k] = binoms[n - 1, k - 1] + binoms[n - 1, k]
+    _RELOC_BINOM_CACHE[key] = binoms
+    return binoms
+
+
+def compute_relocation(opacity_old, scale_old, N, binoms=None, n_max=_RELOC_N_MAX_DEFAULT):
+    n_max = int(n_max)
+    if n_max <= 1:
+        raise ValueError("n_max must be > 1")
+
+    if opacity_old.ndim != 1:
+        opacity_old = opacity_old.reshape(-1)
+    if scale_old.ndim != 2 or scale_old.shape[1] != 3:
+        raise ValueError("scale_old must have shape [P, 3]")
+    if N.ndim != 1:
+        N = N.reshape(-1)
+
+    if not (opacity_old.is_cuda and scale_old.is_cuda and N.is_cuda):
+        raise RuntimeError("compute_relocation requires CUDA tensors for opacity_old/scale_old/N.")
+
+    if opacity_old.shape[0] != scale_old.shape[0] or opacity_old.shape[0] != N.shape[0]:
+        raise ValueError("opacity_old, scale_old, and N must share the same first dimension.")
+
+    opacity_old = opacity_old.to(dtype=torch.float32).contiguous()
+    scale_old = scale_old.to(dtype=torch.float32).contiguous()
+    N = N.to(device=opacity_old.device, dtype=torch.int32).contiguous()
+    N.clamp_(min=1, max=n_max - 1)
+
+    if binoms is None:
+        binoms = _get_relocation_binoms(opacity_old.device, n_max)
+    else:
+        binoms = binoms.to(device=opacity_old.device, dtype=torch.float32).contiguous()
+        if binoms.ndim != 2 or binoms.shape[0] < n_max or binoms.shape[1] < n_max:
+            raise ValueError("binoms must have shape [n_max, n_max] or larger")
+
+    return _C.compute_relocation(opacity_old, scale_old, N, binoms, n_max)
 
 class _RasterizeGaussians(torch.autograd.Function):
     @staticmethod
