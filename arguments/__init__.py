@@ -80,7 +80,7 @@ class PipelineParams(ParamGroup):
 
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
-        self.iterations = 30_000
+        self.iterations = 15_000
         
         # self.offset_lr_init = 0.01
         # self.offset_lr_final = 0.0001
@@ -99,42 +99,42 @@ class OptimizationParams(ParamGroup):
         self.scaling_lr = 0.007
         self.rotation_lr = 0.002
 
-        self.appearance_lr_init = 0.05
-        self.appearance_lr_final = 0.0005
-        self.appearance_lr_delay_mult = 0.01
-        self.appearance_lr_max_steps = 30_000
+        # self.appearance_lr_init = 0.05
+        # self.appearance_lr_final = 0.0005
+        # self.appearance_lr_delay_mult = 0.01
+        # self.appearance_lr_max_steps = 30_000
 
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
-        self.densification_interval = 100
         
         self.min_opacity = 0.005
         self.success_threshold = 0.8
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
+        self.densification_interval = 100
         self.densify_until_iter = self.iterations // 2
         # self.densify_grad_threshold = 0.0002
         self.depth_l1_weight_init = 1.0
         self.depth_l1_weight_final = 0.01
         self.random_background = False
-        self.optimizer_type = "default"
+        self.optimizer_type = "default" # "default" or "sparse_adam"
 
         # MCMC parameters
         self.use_mcmc = True
         self.opacity_reg = 0.01
         self.scale_reg = 0.01
         self.noise_lr = 5e5
-        self.new_gaussian_ratio = 1.02
+        self.new_gaussian_ratio = 1.05
 
         # 3D bilateral grid parameters
         self.use_bilgrid_3d = True
         self.bilgrid_width = 16
-        self.bilgrid_height = 16
+        self.bilgrid_height = 8
         self.bilgrid_depth = 8
         self.bilgrid_tv_loss_mult = 10.0
         self.bilgrid_lr_init = 0.01
         self.bilgrid_lr_final = 0.001
-        self.bilgrid_lr_delay_steps = 2000
+        self.bilgrid_lr_delay_steps = 2500
         self.bilgrid_lr_delay_mult = 1e-8
         self.bilgrid_lr_scale = 0.1
 
