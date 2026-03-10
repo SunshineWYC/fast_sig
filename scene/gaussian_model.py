@@ -15,6 +15,7 @@ import numpy as np
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from torch import nn
 import os
+import math
 import json
 from utils.system_utils import mkdir_p
 from plyfile import PlyData, PlyElement
@@ -22,7 +23,7 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
-from utils.reloc_utils import compute_relocation
+from gsplat.relocation import compute_relocation
 
 
 try:
@@ -50,6 +51,13 @@ class GaussianModel:
 
         self.rotation_activation = torch.nn.functional.normalize
 
+        # MCMC densificaiton params
+        N_max = 51
+        binoms = torch.zeros((N_max, N_max), device="cuda", dtype=torch.float32)
+        for n in range(N_max):
+            for k in range(n + 1):
+                self.binoms[n, k] = math.comb(n, k)
+        self.register_buffer("binoms", binoms, persistent=False)
 
     def __init__(self, sh_degree, optimizer_type="default"):
 
@@ -614,9 +622,12 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
         torch.cuda.empty_cache()
         return optimizable_tensors
+    
+    def compute_relocation(self, opacity_old, scale_old, N):
+        return compute_relocation(opacity_old, scale_old, N, self.binoms)
 
     def _update_params(self, idxs, ratio):
-        new_opacity, new_scaling = compute_relocation(
+        new_opacity, new_scaling = self.compute_relocation(
             opacity_old=self.get_opacity[idxs, 0],
             scale_old=self.get_scaling[idxs],
             N=ratio[idxs, 0] + 1,
