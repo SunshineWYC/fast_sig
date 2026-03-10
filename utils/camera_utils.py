@@ -138,6 +138,7 @@ def V(theta):
         )
     return V
 
+
 def SE3_exp(tau):
     dtype = tau.dtype
     device = tau.device
@@ -151,6 +152,7 @@ def SE3_exp(tau):
     T[:3, :3] = R
     T[:3, 3] = t
     return T
+
 
 def update_pose(camera, converged_threshold=1e-4):
     tau = torch.cat([camera.cam_trans_delta, camera.cam_rot_delta], axis=0)

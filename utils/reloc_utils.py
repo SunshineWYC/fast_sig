@@ -1,7 +1,12 @@
 import math
 
 import torch
-from diff_gaussian_rasterization import compute_relocation as _compute_relocation
+try:
+    from diff_gaussian_rasterization import compute_relocation as _compute_relocation_ext
+except Exception:
+    _compute_relocation_ext = None
+
+_compute_relocation_ext = None
 
 N_max = 51
 _BINOMS = {}
@@ -20,14 +25,23 @@ def _get_binoms(device: torch.device, dtype: torch.dtype = torch.float32):
     return binoms.to(dtype=dtype)
 
 
+def get_relocation_backend() -> str:
+    return "cuda" if _compute_relocation_ext is not None else "python"
+
+
 def compute_relocation_cuda(opacity_old, scale_old, N):
+    if _compute_relocation_ext is None:
+        raise RuntimeError(
+            "diff_gaussian_rasterization.compute_relocation is not available. "
+            "Falling back requires calling compute_relocation()."
+        )
     N = N.to(device=opacity_old.device, dtype=torch.int32).contiguous()
     N.clamp_(min=1, max=N_max - 1)
     binoms = _get_binoms(opacity_old.device).contiguous()
-    return _compute_relocation(opacity_old, scale_old, N, binoms, N_max)
+    return _compute_relocation_ext(opacity_old, scale_old, N, binoms, N_max)
 
 
-def compute_relocation(opacity_old, scale_old, N):
+def _compute_relocation_python(opacity_old, scale_old, N):
     """
     Original Python/Torch implementation of Eq.(9) from 3DGS-MCMC.
     """
@@ -64,3 +78,9 @@ def compute_relocation(opacity_old, scale_old, N):
     coeff = opacity_old / (denom_sum + eps)
     scale_new = scale_old * coeff.unsqueeze(-1)
     return opacity_new, scale_new
+
+
+def compute_relocation(opacity_old, scale_old, N):
+    if _compute_relocation_ext is not None:
+        return compute_relocation_cuda(opacity_old, scale_old, N)
+    return _compute_relocation_python(opacity_old, scale_old, N)

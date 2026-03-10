@@ -82,10 +82,10 @@ class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.iterations = 30_000
         
-        self.offset_lr_init = 0.01
-        self.offset_lr_final = 0.0001
-        self.offset_lr_delay_mult = 0.01
-        self.offset_lr_max_steps = 30_000
+        # self.offset_lr_init = 0.01
+        # self.offset_lr_final = 0.0001
+        # self.offset_lr_delay_mult = 0.01
+        # self.offset_lr_max_steps = 30_000
         
         self.xyz_lr_init = 0.00016
         self.xyz_lr_final = 0.000016
@@ -112,8 +112,8 @@ class OptimizationParams(ParamGroup):
         self.success_threshold = 0.8
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
-        self.densify_until_iter = 15_000
-        self.densify_grad_threshold = 0.0002
+        self.densify_until_iter = self.iterations // 2
+        # self.densify_grad_threshold = 0.0002
         self.depth_l1_weight_init = 1.0
         self.depth_l1_weight_final = 0.01
         self.random_background = False
@@ -126,13 +126,25 @@ class OptimizationParams(ParamGroup):
         self.noise_lr = 5e5
         self.new_gaussian_ratio = 1.02
 
+        # 3D bilateral grid parameters
+        self.use_bilgrid_3d = True
+        self.bilgrid_width = 16
+        self.bilgrid_height = 16
+        self.bilgrid_depth = 8
+        self.bilgrid_tv_loss_mult = 10.0
+        self.bilgrid_lr_init = 0.01
+        self.bilgrid_lr_final = 0.001
+        self.bilgrid_lr_delay_steps = 2000
+        self.bilgrid_lr_delay_mult = 1e-8
+        self.bilgrid_lr_scale = 0.1
+
         # pose optimization parameters
         self.use_pose_optimization = True
         self.pose_rot_lr = 0.00008
         self.pose_trans_lr = 0.00005
         self.pose_update_from = 1000
         self.pose_update_interval = 400
-        self.pose_update_until = 15_000
+        self.pose_update_until = self.iterations // 1.5
         
         super().__init__(parser, "Optimization Parameters")
 

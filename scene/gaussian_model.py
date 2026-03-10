@@ -22,14 +22,13 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
-from utils.reloc_utils import compute_relocation_cuda as compute_relocation
+from utils.reloc_utils import compute_relocation
 
 
 try:
     from diff_gaussian_rasterization import SparseGaussianAdam
 except:
     pass
-
 
 
 class GaussianModel:
@@ -53,6 +52,7 @@ class GaussianModel:
 
 
     def __init__(self, sh_degree, optimizer_type="default"):
+
         self.active_sh_degree = 0
         self.optimizer_type = optimizer_type
         self.max_sh_degree = sh_degree  

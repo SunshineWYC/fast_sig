@@ -14,6 +14,7 @@ from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.schedule_utils import TrainingScheduler
 from utils.pose_refine_utils import export_refined_colmap_model
+from utils.lib_bilagrid import BilateralGrid, slice as bilgrid_slice
 import json
 
 
@@ -69,6 +70,33 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
     scheduler = TrainingScheduler(opt, pipe, gaussians,
                                   [cam.original_image for cam in scene.getTrainCameras()])
 
+    bil_grids = None
+    bilgrid_optimizer = None
+    bilgrid_lr_fn = None
+    bilgrid_cam_idx_map = None
+    if opt.use_bilgrid_3d:
+        # bilateral grid setup, parameters and optimizer
+        train_cameras = scene.getTrainCameras()
+        bilgrid_cam_idx_map = {cam.image_name: idx for idx, cam in enumerate(train_cameras)}
+        bil_grids = BilateralGrid(
+            num=len(train_cameras),
+            grid_X=opt.bilgrid_width,
+            grid_Y=opt.bilgrid_height,
+            grid_W=opt.bilgrid_depth,
+        ).to("cuda")
+        bilgrid_optimizer = torch.optim.Adam(
+            bil_grids.parameters(),
+            lr=opt.bilgrid_lr_init,
+            eps=1e-15,
+        )
+        bilgrid_lr_fn = get_expon_lr_func(
+            lr_init=opt.bilgrid_lr_init,
+            lr_final=opt.bilgrid_lr_final,
+            lr_delay_steps=opt.bilgrid_lr_delay_steps,
+            lr_delay_mult=opt.bilgrid_lr_delay_mult,
+            max_steps=opt.iterations,
+        )
+
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
 
@@ -82,6 +110,13 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
         iter_start.record()
         xyz_lr = gaussians.update_learning_rate(iteration)
         render_scale = scheduler.get_res_scale(iteration)
+
+        # update bilateral grid learning rate
+        if bilgrid_optimizer is not None:
+            bilgrid_lr = bilgrid_lr_fn(iteration) * opt.bilgrid_lr_scale
+            for param_group in bilgrid_optimizer.param_groups:
+                param_group["lr"] = bilgrid_lr
+
 
         # Pick a random Camera
         if not viewpoint_stack:
@@ -121,6 +156,29 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
         )
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
+        # apply bilateral grid correction
+        if bil_grids is not None:
+            h, w = image.shape[-2:]
+            device = image.device
+            dtype = image.dtype
+
+            y = (torch.arange(h, device=device, dtype=dtype) + 0.5) / float(h)
+            x = (torch.arange(w, device=device, dtype=dtype) + 0.5) / float(w)
+            yy, xx = torch.meshgrid(y, x, indexing="ij")
+            pix_xy = torch.stack([xx, yy], dim=-1).reshape(-1, 2)
+
+            rgb_flat = image.permute(1, 2, 0).reshape(-1, 3)
+            cam_idx = bilgrid_cam_idx_map[viewpoint_cam.image_name]
+            cam_idx = torch.full(
+                (pix_xy.shape[0], 1),
+                fill_value=cam_idx,
+                device=device,
+                dtype=torch.long,
+            )
+
+            bilgrid_results = bilgrid_slice(bil_grids, pix_xy, rgb_flat, cam_idx)
+            image = bilgrid_results["rgb"].reshape(h, w, 3).permute(2, 0, 1).contiguous()
+
         # Loss
         Ll1 = l1_loss(image, gt_image)
         if FUSED_SSIM_AVAILABLE:
@@ -150,6 +208,10 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
         if opt.use_mcmc:
             loss = loss + opt.opacity_reg * torch.abs(gaussians.get_opacity).mean()
             loss = loss + opt.scale_reg * torch.abs(gaussians.get_scaling).mean()
+        
+        # bilateral grid regularization
+        if bil_grids is not None and opt.bilgrid_tv_loss_mult > 0:
+            loss = loss + opt.bilgrid_tv_loss_mult * bil_grids.tv_loss()
 
         loss.backward()
 
@@ -190,8 +252,13 @@ def training(dataset, opt, pipe, debug_from, log_file=None):
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none = True)
 
+                # bilate grid optimizer update
+                if bilgrid_optimizer is not None:
+                    bilgrid_optimizer.step()
+                    bilgrid_optimizer.zero_grad(set_to_none=True)
+
+                # MCMC noise SGLD addition
                 if opt.use_mcmc:
-                    # MCMC noise SGLD addition
                     L = build_scaling_rotation(gaussians.get_scaling, gaussians.get_rotation)
                     actual_covariance = L @ L.transpose(1, 2)
 
